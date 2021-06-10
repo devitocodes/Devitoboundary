@@ -3,9 +3,10 @@ import pytest
 import numpy as np
 import sympy as sp
 import pickle
+import os
 
 from devitoboundary.stencils.stencils import (taylor, BoundaryConditions, get_ext_coeffs,
-                                              get_stencils_lambda)
+                                              get_stencils, get_stencils_lambda)
 from devitoboundary.symbolics.symbols import x_a, x_t, x_b, E
 
 
@@ -199,3 +200,31 @@ class TestStencils:
                 errors.append(err)
 
         assert np.median(errors) < thres
+
+    @pytest.mark.parametrize('offset', [0.5, -0.5])
+    @pytest.mark.parametrize('bc_type', ['even', 'odd'])
+    @pytest.mark.parametrize('order', [4, 6])
+    def test_special_variants(self, offset, bc_type, order):
+        """
+        Check that special stencil variants generated for cases where the staggered
+        and unstaggered points lie on either side of the boundary are generated.
+        """
+        # TODO: Possibly make this test more robust
+        cache = os.path.dirname(__file__) + '/../devitoboundary/extrapolation_cache.dat'
+
+        # Staggered stencils only really used with first derivatives
+        deriv = 1
+
+        if bc_type == 'even':
+            bcs = BoundaryConditions({2*i: 0 for i in range(1+order//2)}, order)
+        else:
+            bcs = BoundaryConditions({2*i + 1: 0 for i in range(1+order//2)}, order)
+
+        stencils = get_stencils(deriv, offset, bcs, cache=cache)
+
+        if offset == -0.5:
+            assert stencils.shape == (order+1, order+2, order+1)
+        elif offset == 0.5:
+            assert stencils.shape == (order+2, order+1, order+1)
+
+        # raise NotImplementedError

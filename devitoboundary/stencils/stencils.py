@@ -194,7 +194,7 @@ def get_stencils(deriv, offset, bcs, cache=None):
 
         if side == 'left':
             # Force use of middle point if nomianally no points are available
-            ext_points = tuple(available[:s_o]) if len(available) > 0 else (0,)
+            ext_points = tuple(available[:s_o]) if len(available) > 0 else (outside-s_o//2,)
 
             # Build main substitutions
             main_subs = [(x_a[i], ext_points[i]) for i in range(n_coeffs)]
@@ -206,7 +206,7 @@ def get_stencils(deriv, offset, bcs, cache=None):
                 main_subs += [(x_b, -0.5)]
         else:
             # Force use of middle point if nomianally no points are available
-            ext_points = tuple(available[-s_o:]) if len(available) > 0 else (0,)
+            ext_points = tuple(available[-s_o:]) if len(available) > 0 else (s_o//2-outside,)
 
             # Build main substitutions (Index from right to left for this one)
             main_subs = [(x_a[i], ext_points[-1-i]) for i in range(n_coeffs)]
@@ -218,7 +218,7 @@ def get_stencils(deriv, offset, bcs, cache=None):
                 main_subs += [(x_b, 0.5)]
 
         # Apply main substitutions
-        ext_coeffs = coeff_dict[n_coeffs]
+        ext_coeffs = coeff_dict[n_coeffs].copy()
         ext_coeffs = {coeff: val.subs(main_subs) for (coeff, val) in ext_coeffs.items()}
 
         points = tuple(range(-s_o//2, s_o//2+1))
@@ -258,11 +258,12 @@ def get_stencils(deriv, offset, bcs, cache=None):
         right_add = get_stencil_addition(right_outside, right_available, coeff_dict,
                                          s_o, base_stencil, 'right')
 
-        truncated_stencil = base_stencil.copy()
-        truncated_stencil[:left_outside] = sp.Float(0)
+        stencil = base_stencil.copy()
+
+        stencil += left_add + right_add
+        stencil[:left_outside] = sp.Float(0)
         if right_outside != 0:
-            truncated_stencil[-right_outside:] = sp.Float(0)
-        stencil = truncated_stencil + left_add + right_add
+            stencil[-right_outside:] = sp.Float(0)
 
         return stencil
 
@@ -270,17 +271,32 @@ def get_stencils(deriv, offset, bcs, cache=None):
     base_stencil = standard_stencil(deriv, s_o,
                                     offset=offset, as_float=False)
 
-    stencil_array = np.empty((s_o+1, s_o+1, s_o+1), dtype=object)
+    # If True, then an extra variant should be generated on that side
+    # This variant will be used where the offset point and respective index
+    # point lie on opposite sides of a boundary
+    extra_right = False
+    extra_left = False
+    if np.sign(offset) == -1:
+        # Negative evaluation offset, may need another right variant
+        extra_right = True
+    elif np.sign(offset) == 1:
+        # Positive evaluation offset, may need another left variant
+        extra_left = True
+
+    # Extend range for non-zero offsets
+    stencil_array = np.empty((s_o+1+extra_left, s_o+1+extra_right, s_o+1), dtype=object)
 
     coeff_dict = get_ext_coeffs(bcs, cache=cache)
 
     # Loop over variants
-    for left in range(s_o + 1):
+    # Extend range for non-zero offsets
+    for left in range(s_o + 1 + extra_left):
         left_unusable = get_unusable(left)
         left_outside = get_outside(left)
-        for right in range(s_o + 1):
+        for right in range(s_o + 1 + extra_right):
             right_unusable = get_unusable(right)
             right_outside = get_outside(right)
+
             left_available, right_available = get_available(left_unusable, right_unusable,
                                                             left_outside, right_outside, s_o)
 
@@ -316,6 +332,5 @@ def get_stencils_lambda(deriv, offset, bcs, cache=None):
     stencils = get_stencils(deriv, offset, bcs, cache=cache)
     funcs = np.empty(stencils.shape, dtype=object)
     for i in range(stencils.size):
-        # Add a lambdaify in here
         funcs.flat[i] = sp.lambdify([eta_l, eta_r], stencils.flat[i])
     return funcs
